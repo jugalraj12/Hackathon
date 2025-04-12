@@ -51,6 +51,48 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4" {
   ip_protocol       = "-1" # semantically equivalent to all ports
 }
 
+resource "aws_api_gateway_method" "proxy" {
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+  resource_id = aws_api_gateway_resource.root.id
+  http_method = "POST"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "lambda_integration" {
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+  resource_id = aws_api_gateway_resource.root.id
+  http_method = aws_api_gateway_method.proxy.http_method
+  integration_http_method = "POST"
+  type = "MOCK"
+}
+
+resource "aws_api_gateway_method_response" "proxy" {
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+  resource_id = aws_api_gateway_resource.root.id
+  http_method = aws_api_gateway_method.proxy.http_method
+  status_code = "200"
+}
+
+resource "aws_api_gateway_integration_response" "proxy" {
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+  resource_id = aws_api_gateway_resource.root.id
+  http_method = aws_api_gateway_method.proxy.http_method
+  status_code = aws_api_gateway_method_response.proxy.status_code
+
+  depends_on = [
+    aws_api_gateway_method.proxy,
+    aws_api_gateway_integration.lambda_integration
+  ]
+}
+
+resource "aws_api_gateway_deployment" "deployment" {
+  depends_on = [
+    aws_api_gateway_integration.lambda_integration,
+  ]
+
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+}
+
 # Step 1: Create an ECR repository
 resource "aws_ecr_repository" "lambda_ecr_repo" {
   name                 = "lambda-docker-repo"
@@ -61,7 +103,7 @@ resource "aws_ecr_repository" "lambda_ecr_repo" {
 }
 
 resource "aws_ecr_lifecycle_policy" "lifecycle_policy" {
-  repository = aws_ecr_repository.lambda_ecr_repo
+  repository = aws_ecr_repository.lambda_ecr_repo.name
   policy     = <<EOF
 {
     "rules": [
@@ -85,7 +127,7 @@ EOF
 
 resource "aws_ecr_repository_policy" "policy" {
 
-  repository = aws_ecr_repository.lambda_ecr_repo
+  repository = aws_ecr_repository.lambda_ecr_repo.name
 
   policy     = <<EOF
 {
@@ -147,7 +189,7 @@ resource "time_sleep" "wait_for_deployment" {
 
 # Step 3: Create the Lambda function using Docker image
 resource "aws_lambda_function" "lambda_docker" {
-  function_name = "lambda-docker"
+  function_name = "lambda-docker-demo"
   role          = aws_iam_role.lambda_exec_role.arn
 
   package_type = "Image"
